@@ -4,6 +4,9 @@
 # Auto-detect all SATA/SCSI drives
 DRIVES=()
 
+# Skip SSDs by default (set to false if you want to test SSDs)
+SKIP_SSDS=true
+
 # Add SATA/SCSI drives (only base drives, not partitions)
 for drive in /sys/block/sd*; do
     if [ -d "$drive" ]; then
@@ -14,13 +17,63 @@ for drive in /sys/block/sd*; do
     fi
 done
 
+# Function to check if a drive is an SSD
+is_ssd() {
+    local drive="$1"
+    local smart_info
+
+    # Get SMART information and check for SSD indicators
+    smart_info=$(sudo smartctl -i "$drive" 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        return 1  # Can't determine, assume not SSD
+    fi
+
+    # Check for common SSD indicators
+    if echo "$smart_info" | grep -q "Rotation Rate:.*Solid State Device"; then
+        return 0  # Is SSD
+    elif echo "$smart_info" | grep -q "Form Factor:.*M.2\|mSATA\|2.5"; then
+        # Additional check for form factor (though not 100% reliable)
+        if echo "$smart_info" | grep -q "Device Model:.*SSD\|Solid State"; then
+            return 0  # Is SSD
+        fi
+    fi
+
+    return 1  # Not SSD
+}
+
+# Filter out SSDs if SKIP_SSDS is enabled
+if [ "$SKIP_SSDS" = true ]; then
+    echo "Checking drives for SSDs to skip..."
+    FILTERED_DRIVES=()
+    SKIPPED_DRIVES=()
+
+    for drive in "${DRIVES[@]}"; do
+        if is_ssd "$drive"; then
+            echo "Skipping SSD: $drive"
+            SKIPPED_DRIVES+=("$drive")
+        else
+            FILTERED_DRIVES+=("$drive")
+        fi
+    done
+
+    DRIVES=("${FILTERED_DRIVES[@]}")
+
+    if [ ${#SKIPPED_DRIVES[@]} -gt 0 ]; then
+        echo "Skipped ${#SKIPPED_DRIVES[@]} SSD(s): ${SKIPPED_DRIVES[*]}"
+    fi
+fi
+
 # Check if any drives were found
 if [ ${#DRIVES[@]} -eq 0 ]; then
     echo "No SATA/SCSI drives found on this system!"
+    if [ "$SKIP_SSDS" = true ] && [ ${#SKIPPED_DRIVES[@]} -gt 0 ]; then
+        echo "Note: ${#SKIPPED_DRIVES[@]} SSD(s) were skipped due to SKIP_SSDS=true"
+        echo "Set SKIP_SSDS=false in the script if you want to test SSDs too"
+    fi
     exit 1
 fi
 
-echo "Detected drives: ${DRIVES[*]}"
+echo "Detected drives for testing: ${DRIVES[*]}"
 
 TEST_TYPE="short"
 CONCURRENT_TESTS=4
