@@ -57,12 +57,19 @@ send_email() {
 
     # Get mount point information
     local mount_point=""
-    local mount_info=$(lsblk -no MOUNTPOINT "$drive"* 2>/dev/null | grep -v '^$' | head -1)
+    # First try the drive itself, then its numbered partitions
+    local mount_info=$(lsblk -no MOUNTPOINT "$drive" 2>/dev/null | grep -v '^$' | head -1)
+    if [ -z "$mount_info" ] || [ "$mount_info" = "" ]; then
+        mount_info=$(lsblk -no MOUNTPOINT "$drive"[0-9]* 2>/dev/null | grep -v '^$' | head -1)
+    fi
     if [ -n "$mount_info" ] && [ "$mount_info" != "" ]; then
         mount_point=" ($mount_info)"
     else
         # Try alternative method with findmnt
-        mount_info=$(findmnt -rno TARGET -S "$drive"* 2>/dev/null | head -1)
+        mount_info=$(findmnt -rno TARGET -S "$drive" 2>/dev/null | head -1)
+        if [ -z "$mount_info" ] || [ "$mount_info" = "" ]; then
+            mount_info=$(findmnt -rno TARGET -S "$drive"[0-9]* 2>/dev/null | head -1)
+        fi
         if [ -n "$mount_info" ] && [ "$mount_info" != "" ]; then
             mount_point=" ($mount_info)"
         fi
