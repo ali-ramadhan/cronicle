@@ -7,6 +7,9 @@ DRIVES=()
 # Skip SSDs by default (set to false if you want to test SSDs)
 SKIP_SSDS=true
 
+# Skip drives that don't work with smartctl (set to false to attempt testing all drives)
+SKIP_INACCESSIBLE_DRIVES=true
+
 # Add SATA/SCSI drives (only base drives, not partitions)
 for drive in /sys/block/sd*; do
     if [ -d "$drive" ]; then
@@ -16,6 +19,18 @@ for drive in /sys/block/sd*; do
         fi
     fi
 done
+
+# Function to check if smartctl can access a drive
+can_access_drive() {
+    local drive="$1"
+
+    # Try basic smartctl info command
+    if sudo smartctl -i "$drive" >/dev/null 2>&1; then
+        return 0  # Can access
+    fi
+
+    return 1  # Cannot access
+}
 
 # Function to check if a drive is an SSD
 is_ssd() {
@@ -41,17 +56,31 @@ is_ssd() {
     return 1  # Not SSD
 }
 
-# Filter out SSDs if SKIP_SSDS is enabled
-if [ "$SKIP_SSDS" = true ]; then
-    echo "Checking drives for SSDs to skip..."
+# Filter out SSDs and inaccessible drives
+if [ "$SKIP_SSDS" = true ] || [ "$SKIP_INACCESSIBLE_DRIVES" = true ]; then
+    echo "Checking drives for SSDs and inaccessible drives to skip..."
     FILTERED_DRIVES=()
     SKIPPED_DRIVES=()
 
     for drive in "${DRIVES[@]}"; do
-        if is_ssd "$drive"; then
+        skip_drive=false
+
+        # Check if smartctl can access the drive
+        if [ "$SKIP_INACCESSIBLE_DRIVES" = true ] && ! can_access_drive "$drive"; then
+            echo "Skipping inaccessible drive: $drive (smartctl cannot access)"
+            SKIPPED_DRIVES+=("$drive (inaccessible)")
+            skip_drive=true
+        fi
+
+        # Check if it's an SSD and should be skipped
+        if [ "$skip_drive" = false ] && [ "$SKIP_SSDS" = true ] && is_ssd "$drive"; then
             echo "Skipping SSD: $drive"
-            SKIPPED_DRIVES+=("$drive")
-        else
+            SKIPPED_DRIVES+=("$drive (SSD)")
+            skip_drive=true
+        fi
+
+        # Add drive if not skipped
+        if [ "$skip_drive" = false ]; then
             FILTERED_DRIVES+=("$drive")
         fi
     done
@@ -59,7 +88,10 @@ if [ "$SKIP_SSDS" = true ]; then
     DRIVES=("${FILTERED_DRIVES[@]}")
 
     if [ ${#SKIPPED_DRIVES[@]} -gt 0 ]; then
-        echo "Skipped ${#SKIPPED_DRIVES[@]} SSD(s): ${SKIPPED_DRIVES[*]}"
+        echo "Skipped ${#SKIPPED_DRIVES[@]} drive(s):"
+        for skipped in "${SKIPPED_DRIVES[@]}"; do
+            echo "  - $skipped"
+        done
     fi
 fi
 
@@ -67,8 +99,8 @@ fi
 if [ ${#DRIVES[@]} -eq 0 ]; then
     echo "No SATA/SCSI drives found on this system!"
     if [ "$SKIP_SSDS" = true ] && [ ${#SKIPPED_DRIVES[@]} -gt 0 ]; then
-        echo "Note: ${#SKIPPED_DRIVES[@]} SSD(s) were skipped due to SKIP_SSDS=true"
-        echo "Set SKIP_SSDS=false in the script if you want to test SSDs too"
+        echo "Note: ${#SKIPPED_DRIVES[@]} drive(s) were skipped due to filtering"
+        echo "Set SKIP_SSDS=false and SKIP_INACCESSIBLE_DRIVES=false to test all drives"
     fi
     exit 1
 fi
