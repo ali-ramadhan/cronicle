@@ -1,18 +1,8 @@
 #!/bin/bash
 
 # Configuration
-# Auto-detect all SATA/SCSI and NVMe drives
+# Auto-detect all SATA/SCSI drives
 DRIVES=()
-
-# Add NVMe drives (only base drives, not partitions)
-for drive in /sys/block/nvme*n[0-9]; do
-    if [ -d "$drive" ]; then
-        drive_name="/dev/$(basename "$drive")"
-        if [ -b "$drive_name" ]; then
-            DRIVES+=("$drive_name")
-        fi
-    fi
-done
 
 # Add SATA/SCSI drives (only base drives, not partitions)
 for drive in /sys/block/sd*; do
@@ -26,7 +16,7 @@ done
 
 # Check if any drives were found
 if [ ${#DRIVES[@]} -eq 0 ]; then
-    echo "No SATA/SCSI or NVMe drives found on this system!"
+    echo "No SATA/SCSI drives found on this system!"
     exit 1
 fi
 
