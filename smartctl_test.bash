@@ -111,6 +111,9 @@ TEST_TYPE="short"
 CONCURRENT_TESTS=4
 POLL_INTERVAL=10
 
+# Handle existing SMART tests (true = wait for completion, false = abort and start fresh)
+WAIT_FOR_EXISTING_TESTS=true
+
 # Load environment variables from .env file
 echo "Loading email configuration from .env file..."
 set -a  # automatically export all variables
@@ -361,6 +364,45 @@ test_drive() {
 
     echo "starting" > "$status_file"
     echo "Starting $TEST_TYPE test on $drive at $(date)" >> "$log_file"
+
+    # Check if a test is already running
+    if sudo smartctl -a "$drive" | grep -q "Self-test routine in progress" 2>/dev/null; then
+        if [ "$WAIT_FOR_EXISTING_TESTS" = true ]; then
+            echo "🔄 Existing test found running on $drive, waiting for completion..." >> "$log_file"
+            echo "Existing SMART test detected on $drive, monitoring until completion..."
+            echo "running" > "$status_file"
+
+            # Monitor the existing test until completion
+            while sudo smartctl -a "$drive" | grep -q "Self-test routine in progress" 2>/dev/null; do
+                echo "Existing test still running on $drive..." >> "$log_file"
+                sleep 30
+            done
+
+            local end_time=$(date +%s)
+            echo "Existing test completed on $drive at $(date)" >> "$log_file"
+
+            # Check if the existing test passed or failed
+            if sudo smartctl -l selftest "$drive" | head -10 | grep -q "Completed without error"; then
+                echo "completed" > "$status_file"
+                echo "✅ Existing test PASSED on $drive" >> "$log_file"
+                send_email "$drive" "completed" "$log_file" "$start_time" "$end_time"
+            else
+                echo "failed" > "$status_file"
+                echo "❌ Existing test FAILED on $drive" >> "$log_file"
+                send_email "$drive" "failed" "$log_file" "$start_time" "$end_time"
+            fi
+            return
+        else
+            echo "🛑 Existing test found running on $drive, aborting to start fresh test..." >> "$log_file"
+            echo "Aborting existing SMART test on $drive to start fresh..."
+            if sudo smartctl -X "$drive" >> "$log_file" 2>&1; then
+                echo "Successfully aborted existing test on $drive" >> "$log_file"
+                sleep 5  # Give drive a moment to reset
+            else
+                echo "Warning: Failed to abort existing test on $drive, will try to force new test" >> "$log_file"
+            fi
+        fi
+    fi
 
     # Start the test
     if sudo smartctl -t "$TEST_TYPE" "$drive" >> "$log_file" 2>&1; then
